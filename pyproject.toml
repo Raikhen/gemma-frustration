@@ -1,0 +1,15 @@
+[project]
+name = "gemma-frustration"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=2.28.0",
+    "click",
+    "rich",
+    "python-dotenv",
+    "tenacity",
+    "pandas",
+    "numpy",
+    "datasets",
+    "huggingface-hub",
+]
