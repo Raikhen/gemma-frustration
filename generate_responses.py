@@ -59,35 +59,35 @@ CONDITIONS = [
 ]
 
 
-def build_condition_pools(prefix_file: str) -> dict[str, list[list[dict]]]:
+def build_condition_pools(prefix_file: str) -> dict[str, list[dict]]:
     """Load prefixes and bin them into condition pools.
 
-    Returns a dict mapping condition name → list of message lists (each
-    message list is one prefix conversation that can be prepended).
+    Returns a dict mapping condition name → list of prefix records, where
+    each record has 'id', 'messages', and 'max_frustration'.
     """
     rollouts = load_prefixes(prefix_file)
 
-    pools: dict[str, list[list[dict]]] = {c: [] for c in CONDITIONS}
-    pools["blank"] = [[]]  # one "prefix" that is an empty list
+    pools: dict[str, list[dict]] = {c: [] for c in CONDITIONS}
+    pools["blank"] = [{"id": "blank", "messages": [], "max_frustration": 0}]
 
     for r in rollouts:
         cond = r["condition"]
-        msgs = r["messages"]
         frust = r.get("max_frustration", 0)
+        entry = {"id": r["id"], "messages": r["messages"], "max_frustration": frust}
 
         if cond == "success":
-            pools["success"].append(msgs)
+            pools["success"].append(entry)
         elif cond == "failed-possible":
             if frust < LOW_FRUSTRATION_THRESHOLD:
-                pools["failed-possible-low"].append(msgs)
+                pools["failed-possible-low"].append(entry)
             elif frust >= HIGH_FRUSTRATION_THRESHOLD:
-                pools["failed-possible-high"].append(msgs)
+                pools["failed-possible-high"].append(entry)
             # scores in between are excluded (ambiguous)
         elif cond == "failed-impossible":
             if frust < LOW_FRUSTRATION_THRESHOLD:
-                pools["failed-impossible-low"].append(msgs)
+                pools["failed-impossible-low"].append(entry)
             elif frust >= HIGH_FRUSTRATION_THRESHOLD:
-                pools["failed-impossible-high"].append(msgs)
+                pools["failed-impossible-high"].append(entry)
 
     return pools
 
@@ -159,7 +159,7 @@ async def run(
 
     # For each condition, pick `num_prefixes` prefixes (or all if fewer exist)
     # For each prompt, cycle through the selected prefixes
-    selected_prefixes: dict[str, list[list[dict]]] = {}
+    selected_prefixes: dict[str, list[dict]] = {}
     for cond in active_conditions:
         pool = pools[cond]
         n = min(num_prefixes, len(pool))
@@ -179,19 +179,23 @@ async def run(
 
     semaphore = asyncio.Semaphore(concurrency)
 
-    # Pre-allocate results: responses[pi][cond] = response_text
-    responses: dict[int, dict[str, str]] = {i: {} for i in range(len(prompts))}
+    # Pre-allocate results: responses[pi][cond] = {response, prefix_id}
+    responses: dict[int, dict[str, dict]] = {i: {} for i in range(len(prompts))}
 
     with Progress(console=console) as progress:
         ptask = progress.add_task("Generating responses", total=total)
 
         async def do_one(pi, cond, prefix_idx):
-            prefix_msgs = selected_prefixes[cond][prefix_idx]
+            prefix_rec = selected_prefixes[cond][prefix_idx]
             user_prompt = prompts[pi]["prompt"]
             resp = await generate_one_response(
-                client, model, prefix_msgs, user_prompt, temperature, semaphore,
+                client, model, prefix_rec["messages"], user_prompt, temperature, semaphore,
             )
-            responses[pi][cond] = resp
+            responses[pi][cond] = {
+                "response": resp,
+                "prefix_id": prefix_rec["id"],
+                "prefix_frustration": prefix_rec["max_frustration"],
+            }
             progress.advance(ptask)
 
         await asyncio.gather(*(do_one(pi, cond, pidx) for pi, cond, pidx in tasks))

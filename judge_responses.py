@@ -198,8 +198,11 @@ async def run(
         ptask = progress.add_task("Judging pairs", total=len(tasks))
 
         async def do_one(rec, cond_a, cond_b):
-            resp_a = rec["responses"][cond_a]
-            resp_b = rec["responses"][cond_b]
+            entry_a = rec["responses"][cond_a]
+            entry_b = rec["responses"][cond_b]
+            # Support both old format (bare string) and new format (dict with "response" key)
+            resp_a = entry_a["response"] if isinstance(entry_a, dict) else entry_a
+            resp_b = entry_b["response"] if isinstance(entry_b, dict) else entry_b
 
             # Randomize order to remove position bias
             if rng.random() < 0.5:
